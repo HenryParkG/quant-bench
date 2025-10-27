@@ -7,6 +7,7 @@ Post-Training Quantization(PTQ), Quantization-Aware Training(QAT) 등을 지원�
 
 ## 📂 레포지토리 구조
 
+<pre>
 quant-bench/
 │
 ├── datasets/ # 데이터셋 처리 스크립트 및 다운로드
@@ -54,7 +55,7 @@ quant-bench/
 ├── requirements.txt
 ├── setup.py
 └── README.md
-
+</pre>
 
 ---
 
@@ -83,3 +84,51 @@ python -m venv venv
 source venv/bin/activate  # Linux/Mac
 # .\venv\Scripts\activate  # Windows
 pip install -r requirements.txt
+
+```
+
+🏗 사용법
+1️⃣ 데이터셋 준비
+
+datasets/ 폴더에서 제공하는 스크립트를 통해 다운로드 및 전처리
+
+from datasets.cifar import get_cifar10
+train_loader, test_loader = get_cifar10(batch_size=64)
+
+2️⃣ 모델 로드
+
+models/ 폴더의 모델 래퍼 사용
+
+from models.resnet import ResNet18
+model = ResNet18(pretrained=True)
+
+3️⃣ 양자화 적용
+PTQ
+from quantization.ptq.minmax import apply_minmax_quant
+quantized_model = apply_minmax_quant(model, bit_width=8)
+
+QAT
+from quantization.qat.trainer import train_qat
+qat_model = train_qat(model, train_loader, epochs=10)
+
+4️⃣ 실험 실행
+
+benchmarks/run_experiment.py를 사용하여 YAML 설정 파일 기반 실험
+
+python benchmarks/run_experiment.py --config configs/resnet_ptq.yaml
+
+5️⃣ 결과 확인
+
+results/logs/ → 실험 로그
+
+results/plots/ → Accuracy/Size/Latency 비교 그래프
+
+📊 예제 결과 시각화
+
+Accuracy vs Bit-width
+
+Model Size vs Accuracy
+
+Latency Comparison
+
+자동으로 그래프 생성 가능, 커스텀 시각화는 utils/visualization.py 사용
