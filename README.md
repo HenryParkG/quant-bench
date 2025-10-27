@@ -92,43 +92,47 @@ pip install -r requirements.txt
 
 datasets/ 폴더에서 제공하는 스크립트를 통해 다운로드 및 전처리
 
+<pre>
 from datasets.cifar import get_cifar10
 train_loader, test_loader = get_cifar10(batch_size=64)
+</pre>
 
 2️⃣ 모델 로드
 
 models/ 폴더의 모델 래퍼 사용
-
+<pre>
 from models.resnet import ResNet18
 model = ResNet18(pretrained=True)
+</pre>
 
 3️⃣ 양자화 적용
 PTQ
+<pre>
 from quantization.ptq.minmax import apply_minmax_quant
 quantized_model = apply_minmax_quant(model, bit_width=8)
+</pre>
 
 QAT
+<pre>
 from quantization.qat.trainer import train_qat
 qat_model = train_qat(model, train_loader, epochs=10)
+</pre>
 
 4️⃣ 실험 실행
 
 benchmarks/run_experiment.py를 사용하여 YAML 설정 파일 기반 실험
-
+<pre>
 python benchmarks/run_experiment.py --config configs/resnet_ptq.yaml
+</pre>
 
 5️⃣ 결과 확인
 
 results/logs/ → 실험 로그
-
 results/plots/ → Accuracy/Size/Latency 비교 그래프
 
 📊 예제 결과 시각화
 
 Accuracy vs Bit-width
-
 Model Size vs Accuracy
-
 Latency Comparison
-
 자동으로 그래프 생성 가능, 커스텀 시각화는 utils/visualization.py 사용
