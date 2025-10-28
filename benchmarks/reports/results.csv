@@ -1,0 +1,4 @@
+mode,accuracy,note
+eval,1.0,학습 모델 평가
+ptq,0.75,PTQ 모델
+qat,0.78,QAT 모델

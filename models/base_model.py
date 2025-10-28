@@ -1,16 +1,35 @@
-import torch.nn as nn
+"""모든 모델의 공통 베이스 클래스"""
 
-class BaseModel(nn.Module):
-    def __init__(self, model, num_classes=None):
-        super().__init__()
-        self.model = model
-        if num_classes:
-            self._adjust_fc(num_classes)
+"""
+모델 공통 베이스 클래스
+"""
 
-    def _adjust_fc(self, num_classes):
-        if hasattr(self.model, 'fc'):
-            in_features = self.model.fc.in_features
-            self.model.fc = nn.Linear(in_features, num_classes)
+class BaseModel:
+    def __init__(self, name="BaseModel"):
+        self.name = name
+        print(f"[MODEL] {self.name} 초기화")
 
     def forward(self, x):
-        return self.model(x)
+        # 순전파 뼈대
+        return x
+
+    def train(self, dataset):
+        print(f"[MODEL] {self.name} 학습 중...")
+        for i in range(len(dataset)):
+            x, y = dataset[i]  # __getitem__ 사용
+            out = self.forward(x)
+            # dummy loss 계산
+        print(f"[MODEL] {self.name} 학습 완료")
+
+
+    def evaluate(self, dataset):
+        print(f"[MODEL] {self.name} 평가 중...")
+        correct = 0
+        for i in range(len(dataset)):
+            x, y = dataset[i]
+            pred = self.forward(x) % 2
+            if pred == y:
+                correct += 1
+        acc = correct / len(dataset)
+        print(f"[MODEL] {self.name} 평가 완료, Accuracy={acc}")
+        return acc
