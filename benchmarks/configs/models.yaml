@@ -1,6 +1,0 @@
-models:
-  - name: SimpleCNN
-    path: benchmarks.models.simple_cnn
-    class_name: SimpleCNN
-    params:
-      num_classes: 10
