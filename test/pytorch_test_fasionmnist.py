@@ -92,3 +92,8 @@ with torch.no_grad():
         outputs = model(images)
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
+
+
+# 학습 끝난 후
+torch.save(model.state_dict(), 'output/fashion_cnn.pth')
+print("모델 저장 완료!")

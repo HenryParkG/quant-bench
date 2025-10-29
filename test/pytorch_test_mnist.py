@@ -89,5 +89,5 @@ print(f'Test Accuracy: {100 * correct / total:.2f}%')
 
 
 # 학습 끝난 후
-torch.save(model.state_dict(), 'fashion_cnn.pth')
+torch.save(model.state_dict(), 'output/simplemlp.pth')
 print("모델 저장 완료!")
