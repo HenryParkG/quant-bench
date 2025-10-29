@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from datasets.single_class_dataset import SingleClassDetectionDataset
 from models.faster_rcnn import get_faster_rcnn_model
+from models.yolov11 import get_yolo_model_local_n
 from utils.collate_fn import collate_fn
 import os
 
@@ -12,7 +13,10 @@ dataset = SingleClassDetectionDataset("data/sausage/images", "data/sausage/label
 dataloader = DataLoader(dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
 
 # Model
-model = get_faster_rcnn_model(num_classes=2).to(device)
+# model = get_faster_rcnn_model(num_classes=2).to(device)
+# optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
+model = get_yolo_model_local_n().to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 
 num_epochs = 5
