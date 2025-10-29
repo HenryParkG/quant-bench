@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torchvision.ops
 import math
 
 
@@ -182,6 +183,11 @@ class YOLO11n(nn.Module):
     - depth_multiple: 0.50
     - width_multiple: 0.25
     - max_channels: 1024
+    
+    Structure:
+    - Backbone: Conv layers + C3k2 blocks + SPPF + C2PSA
+    - Neck: FPN-PAN structure with upsampling and concatenation
+    - Head: Multi-scale detection at P3/8, P4/16, P5/32
     """
     def __init__(self, nc=80):
         super().__init__()
@@ -191,7 +197,7 @@ class YOLO11n(nn.Module):
         d = 0.50  # depth_multiple
         w = 0.25  # width_multiple
         
-        # Calculate channel numbers (정확한 채널 계산)
+        # Calculate channel numbers
         ch = [64, 128, 256, 512, 512]
         c = [max(round(c * w), 1) for c in ch]
         c1, c2, c3, c4, c5 = c[0], c[1], c[2], c[3], c[4] * 2
@@ -204,38 +210,34 @@ class YOLO11n(nn.Module):
         n4 = max(round(3 * d), 1)  # 1
         n5 = max(round(3 * d), 1)  # 1
         
-        # Backbone
-        self.b0 = Conv(3, c1, 3, 2)                    # 0: P1/2  [B, 16, 320, 320]
-        self.b1 = Conv(c1, c2, 3, 2)                   # 1: P2/4  [B, 32, 160, 160]
-        self.b2 = C3k2(c2, c3, n1, False)              # 2:       [B, 64, 160, 160]
-        self.b3 = Conv(c3, c3, 3, 2)                   # 3: P3/8  [B, 64, 80, 80]
-        self.b4 = C3k2(c3, c4, n2, False)              # 4:       [B, 128, 80, 80] -> save
-        self.b5 = Conv(c4, c4, 3, 2)                   # 5: P4/16 [B, 128, 40, 40]
-        self.b6 = C3k2(c4, c5, n3, False)              # 6:       [B, 256, 40, 40] -> save
-        self.b7 = Conv(c5, c5, 3, 2)                   # 7: P5/32 [B, 256, 20, 20]
-        self.b8 = C3k2(c5, c5, n4, True)               # 8:       [B, 256, 20, 20]
-        self.b9 = SPPF(c5, c5, 5)                      # 9:       [B, 256, 20, 20]
-        self.b10 = C2PSA(c5, c5, n5)                   # 10:      [B, 256, 20, 20] -> save
+        # Backbone (22 layers)
+        self.b0 = Conv(3, c1, 3, 2)                    # 0: P1/2
+        self.b1 = Conv(c1, c2, 3, 2)                   # 1: P2/4
+        self.b2 = C3k2(c2, c3, n1, False)              # 2
+        self.b3 = Conv(c3, c3, 3, 2)                   # 3: P3/8
+        self.b4 = C3k2(c3, c4, n2, False)              # 4 -> P3 save
+        self.b5 = Conv(c4, c4, 3, 2)                   # 5: P4/16
+        self.b6 = C3k2(c4, c5, n3, False)              # 6 -> P4 save
+        self.b7 = Conv(c5, c5, 3, 2)                   # 7: P5/32
+        self.b8 = C3k2(c5, c5, n4, True)               # 8 (c3k=True)
+        self.b9 = SPPF(c5, c5, 5)                      # 9
+        self.b10 = C2PSA(c5, c5, n5)                   # 10 -> P5 save
         
-        # Neck/Head
-        self.n0 = nn.Upsample(None, 2, 'nearest')      # 11: upsample [B, 256, 40, 40]
-        # concat with b6 (256) -> [B, 512, 40, 40]
-        self.n1 = C3k2(c5 + c5, c4, n1, False)         # 12: [B, 512, 40, 40] -> [B, 128, 40, 40]
-        
-        self.n2 = nn.Upsample(None, 2, 'nearest')      # 13: upsample [B, 128, 80, 80]
-        # concat with b4 (128) -> [B, 256, 80, 80]
-        self.n3 = C2f(c4 + c4, c3, n1)                 # 14: [B, 256, 80, 80] -> [B, 64, 80, 80] (P3)
-        
-        self.n4 = Conv(c3, c3, 3, 2)                   # 15: [B, 64, 40, 40]
-        # concat with n1 output (128) -> [B, 192, 40, 40]
-        self.n5 = C3k2(c3 + c4, c4, n1, False)         # 16: [B, 192, 40, 40] -> [B, 128, 40, 40] (P4)
-        
-        self.n6 = Conv(c4, c4, 3, 2)                   # 17: [B, 128, 20, 20]
-        # concat with b10 (256) -> [B, 384, 20, 20]
-        self.n7 = C3k2(c4 + c5, c5, n1, False)         # 18: [B, 384, 20, 20] -> [B, 256, 20, 20] (P5)
+        # Neck/Head (12 layers)
+        self.n0 = nn.Upsample(None, 2, 'nearest')      # 11
+        self.n1 = C3k2(c5 + c5, c4, n1, False)         # 12
+        self.n2 = nn.Upsample(None, 2, 'nearest')      # 13
+        self.n3 = C2f(c4 + c4, c3, n1)                 # 14 -> P3 detect
+        self.n4 = Conv(c3, c3, 3, 2)                   # 15
+        self.n5 = C3k2(c3 + c4, c4, n1, False)         # 16 -> P4 detect
+        self.n6 = Conv(c4, c4, 3, 2)                   # 17
+        self.n7 = C3k2(c4 + c5, c5, n1, False)         # 18 -> P5 detect
         
         # Detection head
-        self.detect = Detect(nc, (c3, c4, c5))         # Detect on P3, P4, P5
+        self.detect = Detect(nc, (c3, c4, c5))         # 19-21
+        
+        # Store channel info for postprocessing
+        self.stride = torch.tensor([8.0, 16.0, 32.0])
         
         # Initialize weights
         self._initialize_weights()
@@ -258,43 +260,44 @@ class YOLO11n(nn.Module):
             targets: Training targets (optional)
         
         Returns:
-            Predictions or loss dict depending on mode
+            If training: loss dict
+            If inference: list of 3 detection tensors
         """
         # Handle list of images
         if isinstance(x, list):
             x = torch.stack(x)
         
         # Backbone
-        x = self.b0(x)     # 0: [B, 16, 320, 320]
-        x = self.b1(x)     # 1: [B, 32, 160, 160]
-        x = self.b2(x)     # 2: [B, 64, 160, 160]
-        x = self.b3(x)     # 3: [B, 64, 80, 80]
-        p3 = self.b4(x)    # 4: [B, 128, 80, 80] - save
-        x = self.b5(p3)    # 5: [B, 128, 40, 40]
-        p4 = self.b6(x)    # 6: [B, 256, 40, 40] - save
-        x = self.b7(p4)    # 7: [B, 256, 20, 20]
-        x = self.b8(x)     # 8: [B, 256, 20, 20]
-        x = self.b9(x)     # 9: [B, 256, 20, 20]
-        p5 = self.b10(x)   # 10: [B, 256, 20, 20] - save
+        x = self.b0(x)     # [B, 16, H/2, W/2]
+        x = self.b1(x)     # [B, 32, H/4, W/4]
+        x = self.b2(x)     # [B, 64, H/4, W/4]
+        x = self.b3(x)     # [B, 64, H/8, W/8]
+        p3 = self.b4(x)    # [B, 128, H/8, W/8] - P3
+        x = self.b5(p3)    # [B, 128, H/16, W/16]
+        p4 = self.b6(x)    # [B, 256, H/16, W/16] - P4
+        x = self.b7(p4)    # [B, 256, H/32, W/32]
+        x = self.b8(x)     # [B, 256, H/32, W/32]
+        x = self.b9(x)     # [B, 256, H/32, W/32]
+        p5 = self.b10(x)   # [B, 256, H/32, W/32] - P5
         
         # Neck (Top-down)
-        x = self.n0(p5)    # 11: [B, 256, 40, 40] - upsample
-        x = torch.cat([x, p4], 1)  # concat: [B, 512, 40, 40]
-        x = self.n1(x)     # 12: [B, 128, 40, 40]
+        x = self.n0(p5)                    # Upsample
+        x = torch.cat([x, p4], 1)          # [B, 512, H/16, W/16]
+        x = self.n1(x)                     # [B, 128, H/16, W/16]
         p4_out = x
         
-        x = self.n2(x)     # 13: [B, 128, 80, 80] - upsample
-        x = torch.cat([x, p3], 1)  # concat: [B, 256, 80, 80]
-        p3_out = self.n3(x)  # 14: [B, 64, 80, 80] - P3 output
+        x = self.n2(x)                     # Upsample
+        x = torch.cat([x, p3], 1)          # [B, 256, H/8, W/8]
+        p3_out = self.n3(x)                # [B, 64, H/8, W/8]
         
         # Neck (Bottom-up)
-        x = self.n4(p3_out)  # 15: [B, 64, 40, 40] - downsample
-        x = torch.cat([x, p4_out], 1)  # concat: [B, 192, 40, 40]
-        p4_final = self.n5(x)  # 16: [B, 128, 40, 40] - P4 output
+        x = self.n4(p3_out)                # [B, 64, H/16, W/16]
+        x = torch.cat([x, p4_out], 1)      # [B, 192, H/16, W/16]
+        p4_final = self.n5(x)              # [B, 128, H/16, W/16]
         
-        x = self.n6(p4_final)  # 17: [B, 128, 20, 20] - downsample
-        x = torch.cat([x, p5], 1)  # concat: [B, 384, 20, 20]
-        p5_final = self.n7(x)  # 18: [B, 256, 20, 20] - P5 output
+        x = self.n6(p4_final)              # [B, 128, H/32, W/32]
+        x = torch.cat([x, p5], 1)          # [B, 384, H/32, W/32]
+        p5_final = self.n7(x)              # [B, 256, H/32, W/32]
         
         # Detection
         outputs = self.detect([p3_out, p4_final, p5_final])
@@ -306,7 +309,7 @@ class YOLO11n(nn.Module):
         return outputs
     
     def _compute_loss(self, predictions, targets):
-        """Simplified loss computation."""
+        """Simplified loss computation for training."""
         device = predictions[0].device
         loss = torch.tensor(0.0, device=device)
         
@@ -321,12 +324,108 @@ class YOLO11n(nn.Module):
         }
 
 
+def postprocess(predictions, img_shape=(640, 640), conf_thres=0.25, iou_thres=0.45, max_det=300):
+    """
+    Post-process YOLO11 predictions.
+    
+    Args:
+        predictions: List of 3 tensors from detect heads [B, nc+64, H, W]
+        img_shape: Input image shape (H, W)
+        conf_thres: Confidence threshold
+        iou_thres: IoU threshold for NMS
+        max_det: Maximum detections per image
+    
+    Returns:
+        List of detections per image: [N, 6] (x1, y1, x2, y2, conf, cls)
+    """
+    device = predictions[0].device
+    batch_size = predictions[0].shape[0]
+    nc = predictions[0].shape[1] - 64  # Number of classes
+    reg_max = 16
+    
+    # Strides for each detection head
+    strides = torch.tensor([8.0, 16.0, 32.0], device=device)
+    
+    all_predictions = []
+    
+    for i, pred in enumerate(predictions):
+        b, c, h, w = pred.shape
+        stride = strides[i]
+        
+        # Split predictions: bbox[64] + class[nc]
+        box_pred = pred[:, :64, :, :]      # [B, 64, H, W]
+        cls_pred = pred[:, 64:, :, :]      # [B, nc, H, W]
+        
+        # Reshape for DFL
+        box_pred = box_pred.permute(0, 2, 3, 1).reshape(b, h * w, 4, reg_max)
+        cls_pred = cls_pred.permute(0, 2, 3, 1).reshape(b, h * w, nc)
+        
+        # Apply DFL (Distribution Focal Loss)
+        box_pred = box_pred.softmax(-1) @ torch.arange(reg_max, device=device, dtype=torch.float)
+        
+        # Create anchor grid
+        grid_y, grid_x = torch.meshgrid(
+            torch.arange(h, device=device), 
+            torch.arange(w, device=device), 
+            indexing='ij'
+        )
+        grid = torch.stack([grid_x, grid_y], dim=-1).reshape(1, -1, 2).float()
+        
+        # Decode boxes (ltrb -> xyxy)
+        box_pred = box_pred.reshape(b, h * w, 4)
+        lt = grid - box_pred[:, :, :2]  # left-top
+        rb = grid + box_pred[:, :, 2:]  # right-bottom
+        boxes = torch.cat([lt, rb], dim=-1) * stride
+        
+        # Apply sigmoid to class predictions
+        scores = cls_pred.sigmoid()
+        
+        # Concatenate boxes and scores
+        all_predictions.append(torch.cat([boxes, scores], dim=-1))
+    
+    # Concatenate all scale predictions
+    predictions = torch.cat(all_predictions, dim=1)  # [B, total_anchors, 4+nc]
+    
+    # Process each image in batch
+    outputs = []
+    for pred in predictions:
+        # Get max class score and index
+        scores, labels = pred[:, 4:].max(dim=1)
+        
+        # Filter by confidence threshold
+        mask = scores > conf_thres
+        pred = pred[mask]
+        scores = scores[mask]
+        labels = labels[mask]
+        
+        if len(pred) == 0:
+            outputs.append(torch.zeros((0, 6), device=device))
+            continue
+        
+        boxes = pred[:, :4]
+        
+        # Apply NMS
+        keep = torchvision.ops.nms(boxes, scores, iou_thres)
+        keep = keep[:max_det]
+        
+        # Combine results: [x1, y1, x2, y2, conf, cls]
+        result = torch.cat([
+            boxes[keep], 
+            scores[keep].unsqueeze(1), 
+            labels[keep].unsqueeze(1).float()
+        ], dim=1)
+        
+        outputs.append(result)
+    
+    return outputs
+
+
 def get_yolo11n(nc=80, pretrained=False):
     """
     Create YOLO11n model.
     
     Args:
-        nc: Number of classes
+        nc: Number of classes (default: 80 for COCO)
         pretrained: Load pretrained weights (requires .pt file)
     
     Returns:
@@ -342,36 +441,68 @@ def get_yolo11n(nc=80, pretrained=False):
 
 # if __name__ == "__main__":
 #     # Test model
+#     print("=" * 60)
+#     print("YOLO11n Model Test")
+#     print("=" * 60)
+    
 #     model = get_yolo11n(nc=80)
 #     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #     model = model.to(device)
     
 #     # Count parameters
 #     total_params = sum(p.numel() for p in model.parameters())
-#     print(f"Total parameters: {total_params:,}")
+#     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+#     print(f"\nTotal parameters: {total_params:,}")
+#     print(f"Trainable parameters: {trainable_params:,}")
+#     print(f"Expected: ~2.6M parameters for YOLO11n")
     
-#     # Test inference with detailed shape info
-#     print("\n=== Testing Forward Pass ===")
+#     # Test inference
+#     print("\n" + "=" * 60)
+#     print("Testing Inference Mode")
+#     print("=" * 60)
 #     model.eval()
-#     x = torch.randn(2, 3, 640, 640).to(device)
+    
+#     batch_size = 2
+#     img_size = 640
+#     x = torch.randn(batch_size, 3, img_size, img_size).to(device)
     
 #     print(f"Input shape: {x.shape}")
     
 #     with torch.no_grad():
 #         outputs = model(x)
     
-#     print(f"\nOutput shapes:")
+#     print(f"\nRaw outputs from Detect head:")
 #     for i, out in enumerate(outputs):
-#         print(f"  Detection head {i}: {out.shape}")
+#         print(f"  P{i+3} head (stride {8 * 2**i}): {out.shape}")
     
-#     # Test training
-#     print("\n=== Testing Training Mode ===")
+#     # Test postprocessing
+#     print("\n" + "=" * 60)
+#     print("Testing Postprocessing")
+#     print("=" * 60)
+    
+#     with torch.no_grad():
+#         detections = postprocess(outputs, conf_thres=0.5, iou_thres=0.45)
+    
+#     for i, det in enumerate(detections):
+#         print(f"Image {i}: {len(det)} detections")
+#         if len(det) > 0:
+#             print(f"  Shape: {det.shape} (x1, y1, x2, y2, conf, cls)")
+    
+#     # Test training mode
+#     print("\n" + "=" * 60)
+#     print("Testing Training Mode")
+#     print("=" * 60)
 #     model.train()
+    
 #     targets = [
 #         {'boxes': torch.rand(3, 4).to(device), 'labels': torch.randint(0, 80, (3,)).to(device)},
 #         {'boxes': torch.rand(2, 4).to(device), 'labels': torch.randint(0, 80, (2,)).to(device)}
 #     ]
     
 #     loss_dict = model(x, targets)
-#     print(f"Loss: {loss_dict['loss'].item():.6f}")
-#     print(f"Model ready for training!")
+#     print(f"Loss dict: {loss_dict.keys()}")
+#     print(f"Total loss: {loss_dict['loss'].item():.6f}")
+    
+#     print("\n" + "=" * 60)
+#     print("Model ready for training and inference!")
+#     print("=" * 60)
