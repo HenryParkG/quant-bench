@@ -1,0 +1,13 @@
+# dataset/data.yaml
+
+# 학습/검증 데이터 경로
+train: ../data/sausage/images/  # train 이미지 폴더
+val:   ../data/sausage/test_images/images    # val 이미지 폴더
+
+# 클래스 수
+nc: 2
+
+# 클래스 이름
+names:
+  0: sausage
+  1: bun

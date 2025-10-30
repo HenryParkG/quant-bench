@@ -4,6 +4,7 @@ import numpy as np
 from torch.utils.data import Dataset
 from .base_dataset import BaseDataset, yolo_to_bbox
 import torch
+import torchvision.transforms as transforms
 
 class YOLODataset(BaseDataset):
     def __init__(self, img_dir, label_dir, transforms=None):
@@ -15,21 +16,24 @@ class YOLODataset(BaseDataset):
     def __len__(self):
         return len(self.img_files)
 
-
     def __getitem__(self, idx):
-        img, target = self.load_image_and_target(idx)
+        img_path = os.path.join(self.img_dir, self.img_files[idx])
+        label_path = os.path.join(self.label_dir, self.img_files[idx].rsplit('.', 1)[0] + '.txt')
 
-        boxes = target["boxes"]
-        labels = target["labels"].unsqueeze(1)  # (N,1)
+        img = Image.open(img_path).convert("RGB")
+        img_width, img_height = img.size
 
-        # YOLO 포맷으로 [class, x, y, w, h] 만들기 (정규화 포함)
-        img_w, img_h = img.shape[-1], img.shape[-2]
-        xyxy = boxes.clone()
-        xywh = torch.zeros_like(xyxy)
-        xywh[:, 0] = ((xyxy[:, 0] + xyxy[:, 2]) / 2) / img_w  # x_center
-        xywh[:, 1] = ((xyxy[:, 1] + xyxy[:, 3]) / 2) / img_h  # y_center
-        xywh[:, 2] = (xyxy[:, 2] - xyxy[:, 0]) / img_w         # w
-        xywh[:, 3] = (xyxy[:, 3] - xyxy[:, 1]) / img_h         # h
+        if os.path.exists(label_path) and os.path.getsize(label_path) > 0:
+            yolo_labels = np.loadtxt(label_path, ndmin=2)
+            boxes, labels = yolo_to_bbox(yolo_labels, img_width, img_height)
+        else:
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            labels = torch.zeros((0,), dtype=torch.int64)
 
-        targets = torch.cat([labels, xywh], dim=1)
-        return img, targets
+        target = {"boxes": boxes, "labels": labels, "image_id": torch.tensor([idx])}
+        img = self.apply_transforms(img)
+
+        if not isinstance(img, torch.Tensor):
+            img = transforms.ToTensor()(img)
+
+        return img, target
