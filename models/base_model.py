@@ -6,6 +6,9 @@ MODEL_MAP = {
     "keypointrcnn": "models.keypointrcnn_model",
     "retinanet": "models.retinanet_model",
     "ssd": "models.ssd_model",
+    "fcos" : "models.fcos_model",
+    "resnet" : "models.resnet_model",
+    "custom" : "models.custom_model",
 }
 
 def load_model(model_type: str, num_classes: int, **kwargs):
